@@ -10,6 +10,7 @@
     "start": "tsx src/server.ts",
     "dev": "tsx watch src/server.ts",
     "test": "vitest run",
+    "live-check": "tsx scripts/live-check.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },

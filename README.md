@@ -295,3 +295,23 @@ tests/                  unit, HTTP and concurrency tests
 
 Tests that need two requests to overlap use a payment gateway the test
 controls, pausing a checkout mid-payment instead of relying on timing.
+
+### Live check against a running server
+
+```bash
+npm run live-check
+```
+
+Starts the real server as its own process (as `npm start` would, with
+`NTH_ORDER=3` and a 600 ms payment delay) and sends real HTTP requests for 76
+edge cases: validation, retries, ten customers racing for three units, ten
+checkouts racing for one coupon, changes made while a payment is pending,
+report reconciliation, and more. It prints PASS/FAIL for each and stops the
+server afterwards (about 25 seconds).
+
+Payment declines can only be triggered from code, so those few cases run
+against a second real HTTP server started inside the script.
+
+To run it against a server you started yourself, start it fresh with
+`DISCOUNT_PERCENT=10` and set `BASE_URL`, e.g.
+`BASE_URL=http://localhost:3000 npm run live-check`.
