@@ -17,7 +17,8 @@ export function assertCents(value: number, label = 'amount'): Cents {
       `${label} must be a non-negative integer number of cents, got ${value}`,
     );
   }
-  return value;
+  // -0 passes the checks above (JSON.parse('-0') produces it); store plain 0.
+  return value === 0 ? 0 : value;
 }
 
 export function assertQuantity(quantity: number): number {
