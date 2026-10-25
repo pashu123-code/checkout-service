@@ -13,7 +13,6 @@ const app = createApp({
 
 app.listen(config.port, () => {
   console.log(`Checkout service listening on http://localhost:${config.port}`);
-  console.log(
-    `Every ${config.nthOrder}th order unlocks a ${config.discountPercent}% coupon.`,
-  );
+  const orders = config.nthOrder === 1 ? 'order' : `${config.nthOrder} orders`;
+  console.log(`A ${config.discountPercent}% coupon unlocks after every ${orders}.`);
 });
