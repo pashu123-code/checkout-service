@@ -10,7 +10,13 @@ export type ErrorCode =
   | 'PRODUCT_NOT_FOUND'
   | 'CART_NOT_FOUND'
   | 'CART_NOT_OPEN'
+  | 'CART_EMPTY'
+  | 'CART_ALREADY_CHECKED_OUT'
+  | 'CHECKOUT_IN_PROGRESS'
   | 'INSUFFICIENT_INVENTORY'
+  | 'TOTAL_MISMATCH'
+  | 'PAYMENT_DECLINED'
+  | 'ORDER_NOT_FOUND'
   | 'INTERNAL_ERROR';
 
 export class AppError extends Error {

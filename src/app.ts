@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Config } from './config';
 import { errorHandler, routeNotFound } from './http/errorHandler';
 import { parseBody } from './http/validate';
+import type { PaymentGateway } from './payment';
 import { listProducts } from './services/catalog';
 import {
   MAX_LINE_QUANTITY,
@@ -12,18 +13,27 @@ import {
   setItemQuantity,
   toCartView,
 } from './services/carts';
+import { checkout } from './services/checkout';
+import { getOrderOrThrow } from './services/orders';
 import type { Store } from './store';
 
 export interface AppContext {
   store: Store;
   config: Config;
+  payment: PaymentGateway;
 }
 
-const setQuantityBody = z.object({
+// Strict objects reject unknown fields, so a typo such as "quantiy" or
+// "expectedTotal" fails loudly instead of being silently ignored.
+const setQuantityBody = z.strictObject({
   quantity: z.number().int().min(1).max(MAX_LINE_QUANTITY),
 });
 
-export function createApp({ store }: AppContext): Express {
+const checkoutBody = z.strictObject({
+  expectedTotalCents: z.number().int().min(0).optional(),
+});
+
+export function createApp({ store, payment }: AppContext): Express {
   const app = express();
   app.use(express.json({ limit: '16kb' }));
 
@@ -48,6 +58,16 @@ export function createApp({ store }: AppContext): Express {
   app.delete('/carts/:cartId/items/:productId', (req, res) => {
     const cart = removeItem(store, req.params.cartId, req.params.productId);
     res.json(toCartView(store, cart));
+  });
+
+  app.post('/carts/:cartId/checkout', async (req, res) => {
+    const body = parseBody(checkoutBody, req.body);
+    const order = await checkout({ store, payment }, { cartId: req.params.cartId, ...body });
+    res.status(201).json(order);
+  });
+
+  app.get('/orders/:orderId', (req, res) => {
+    res.json(getOrderOrThrow(store, req.params.orderId));
   });
 
   app.use(routeNotFound);

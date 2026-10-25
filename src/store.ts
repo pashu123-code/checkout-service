@@ -22,6 +22,31 @@ export interface Cart {
   updatedAt: string;
 }
 
+/** A copy of what was bought, so later product edits never change an order. */
+export interface OrderLine {
+  productId: string;
+  name: string;
+  unitPriceCents: Cents;
+  quantity: number;
+  lineTotalCents: Cents;
+}
+
+export interface Order {
+  id: string;
+  /** 1 for the first successfully placed order, 2 for the second, and so on. */
+  number: number;
+  cartId: string;
+  lines: OrderLine[];
+  subtotalCents: Cents;
+  discountPercent: number | null;
+  discountCents: Cents;
+  totalCents: Cents;
+  couponCode: string | null;
+  /** Null when nothing had to be charged (a zero total). */
+  paymentId: string | null;
+  placedAt: string;
+}
+
 /**
  * All application state. Everything lives in memory, so a restart starts
  * from the seed data again.
@@ -29,12 +54,15 @@ export interface Cart {
 export interface Store {
   products: Map<string, Product>;
   carts: Map<string, Cart>;
+  /** Only successfully placed orders. Never deleted, so size = orders placed. */
+  orders: Map<string, Order>;
 }
 
 export function createStore(products: readonly Product[]): Store {
   return {
     products: new Map(products.map((product) => [product.id, { ...product }])),
     carts: new Map(),
+    orders: new Map(),
   };
 }
 
