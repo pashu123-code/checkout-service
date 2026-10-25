@@ -23,6 +23,7 @@ export type ErrorCode =
   | 'COUPON_IN_USE'
   | 'COUPON_ALREADY_REDEEMED'
   | 'NO_ELIGIBLE_MILESTONE'
+  | 'STOCK_BELOW_RESERVED'
   | 'INTERNAL_ERROR';
 
 export class AppError extends Error {

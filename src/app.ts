@@ -5,7 +5,7 @@ import { badRequest } from './errors';
 import { errorHandler, routeNotFound } from './http/errorHandler';
 import { parseBody } from './http/validate';
 import type { PaymentGateway } from './payment';
-import { listProducts } from './services/catalog';
+import { listProducts, toAdminProductView, updateProduct } from './services/catalog';
 import {
   MAX_LINE_QUANTITY,
   createCart,
@@ -17,7 +17,8 @@ import {
 import { checkout, checkoutFingerprint } from './services/checkout';
 import { generateCoupon, listCoupons } from './services/coupons';
 import { runIdempotent } from './services/idempotency';
-import { getOrderOrThrow } from './services/orders';
+import { getOrderOrThrow, listOrders } from './services/orders';
+import { buildReport } from './services/report';
 import type { Store } from './store';
 
 export interface AppContext {
@@ -36,6 +37,18 @@ const checkoutBody = z.strictObject({
   couponCode: z.string().trim().min(1).max(64).optional(),
   expectedTotalCents: z.number().int().min(0).optional(),
 });
+
+// Price is capped at $1,000,000 so that no cart total can approach the
+// largest integer JavaScript stores exactly.
+const updateProductBody = z
+  .strictObject({
+    name: z.string().trim().min(1).max(200).optional(),
+    priceCents: z.number().int().min(0).max(100_000_000).optional(),
+    stock: z.number().int().min(0).max(1_000_000).optional(),
+  })
+  .refine((body) => Object.keys(body).length > 0, {
+    message: 'Provide at least one of name, priceCents or stock.',
+  });
 
 export function createApp({ store, config, payment }: AppContext): Express {
   const app = express();
@@ -89,6 +102,19 @@ export function createApp({ store, config, payment }: AppContext): Express {
 
   app.get('/admin/coupons', (_req, res) => {
     res.json({ items: listCoupons(store) });
+  });
+
+  app.get('/admin/orders', (_req, res) => {
+    res.json({ items: listOrders(store) });
+  });
+
+  app.get('/admin/report', (_req, res) => {
+    res.json(buildReport(store, config));
+  });
+
+  app.patch('/admin/products/:productId', (req, res) => {
+    const update = parseBody(updateProductBody, req.body);
+    res.json(toAdminProductView(updateProduct(store, req.params.productId, update)));
   });
 
   app.use(routeNotFound);
