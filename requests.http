@@ -1,0 +1,111 @@
+# Example requests for the VS Code REST Client or JetBrains HTTP Client.
+# Start the server first: npm start (or NTH_ORDER=2 npm start to reach a
+# coupon milestone faster). Run the requests top to bottom.
+
+@base = http://localhost:3000
+
+### List products
+GET {{base}}/products
+
+### Create a cart
+# @name cart
+POST {{base}}/carts
+
+### Add two T-shirts (sets the quantity; repeating it changes nothing)
+PUT {{base}}/carts/{{cart.response.body.id}}/items/p_tshirt
+Content-Type: application/json
+
+{ "quantity": 2 }
+
+### Add a mug
+PUT {{base}}/carts/{{cart.response.body.id}}/items/p_mug
+Content-Type: application/json
+
+{ "quantity": 1 }
+
+### View the cart
+GET {{base}}/carts/{{cart.response.body.id}}
+
+### Check out
+# @name order
+POST {{base}}/carts/{{cart.response.body.id}}/checkout
+Content-Type: application/json
+Idempotency-Key: example-order-1
+
+{}
+
+### Retry the same checkout: same order back, Idempotent-Replayed: true
+POST {{base}}/carts/{{cart.response.body.id}}/checkout
+Content-Type: application/json
+Idempotency-Key: example-order-1
+
+{}
+
+### Check out the same cart with a new key: 409 CART_ALREADY_CHECKED_OUT
+POST {{base}}/carts/{{cart.response.body.id}}/checkout
+Content-Type: application/json
+Idempotency-Key: example-order-2
+
+{}
+
+### View the order
+GET {{base}}/orders/{{order.response.body.id}}
+
+### Admin: issue a coupon (409 until the next milestone is reached)
+# @name coupon
+POST {{base}}/admin/coupons
+
+### Admin: list coupons
+GET {{base}}/admin/coupons
+
+### Check out a new cart with the coupon
+# @name cart2
+POST {{base}}/carts
+
+###
+PUT {{base}}/carts/{{cart2.response.body.id}}/items/p_hoodie
+Content-Type: application/json
+
+{ "quantity": 1 }
+
+###
+POST {{base}}/carts/{{cart2.response.body.id}}/checkout
+Content-Type: application/json
+Idempotency-Key: example-order-3
+
+{ "couponCode": "{{coupon.response.body.code}}" }
+
+### Refuse to pay anything other than the expected total: 409 TOTAL_MISMATCH
+# @name cart3
+POST {{base}}/carts
+
+###
+PUT {{base}}/carts/{{cart3.response.body.id}}/items/p_cap
+Content-Type: application/json
+
+{ "quantity": 1 }
+
+###
+POST {{base}}/carts/{{cart3.response.body.id}}/checkout
+Content-Type: application/json
+Idempotency-Key: example-order-4
+
+{ "expectedTotalCents": 1 }
+
+### Validation error: 422 VALIDATION_FAILED
+PUT {{base}}/carts/{{cart3.response.body.id}}/items/p_cap
+Content-Type: application/json
+
+{ "quantity": 0 }
+
+### Admin: change a price (existing orders keep theirs)
+PATCH {{base}}/admin/products/p_cap
+Content-Type: application/json
+
+{ "priceCents": 1799 }
+
+### Admin: list orders
+GET {{base}}/admin/orders
+
+### Admin: report
+GET {{base}}/admin/report
