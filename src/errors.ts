@@ -19,6 +19,10 @@ export type ErrorCode =
   | 'TOTAL_MISMATCH'
   | 'PAYMENT_DECLINED'
   | 'ORDER_NOT_FOUND'
+  | 'COUPON_NOT_FOUND'
+  | 'COUPON_IN_USE'
+  | 'COUPON_ALREADY_REDEEMED'
+  | 'NO_ELIGIBLE_MILESTONE'
   | 'INTERNAL_ERROR';
 
 export class AppError extends Error {

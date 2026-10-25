@@ -15,6 +15,7 @@ import {
   toCartView,
 } from './services/carts';
 import { checkout, checkoutFingerprint } from './services/checkout';
+import { generateCoupon, listCoupons } from './services/coupons';
 import { runIdempotent } from './services/idempotency';
 import { getOrderOrThrow } from './services/orders';
 import type { Store } from './store';
@@ -32,10 +33,11 @@ const setQuantityBody = z.strictObject({
 });
 
 const checkoutBody = z.strictObject({
+  couponCode: z.string().trim().min(1).max(64).optional(),
   expectedTotalCents: z.number().int().min(0).optional(),
 });
 
-export function createApp({ store, payment }: AppContext): Express {
+export function createApp({ store, config, payment }: AppContext): Express {
   const app = express();
   app.use(express.json({ limit: '16kb' }));
 
@@ -77,6 +79,16 @@ export function createApp({ store, payment }: AppContext): Express {
 
   app.get('/orders/:orderId', (req, res) => {
     res.json(getOrderOrThrow(store, req.params.orderId));
+  });
+
+  // Administrative operations. Authentication is out of scope; in production
+  // these routes would sit behind an admin role.
+  app.post('/admin/coupons', (_req, res) => {
+    res.status(201).json(generateCoupon(store, config));
+  });
+
+  app.get('/admin/coupons', (_req, res) => {
+    res.json({ items: listCoupons(store) });
   });
 
   app.use(routeNotFound);

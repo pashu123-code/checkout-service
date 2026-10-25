@@ -5,6 +5,7 @@ import { AppError, conflict, unprocessable } from '../errors';
 import { type PaymentGateway, PaymentDeclinedError } from '../payment';
 import {
   type Cart,
+  type Coupon,
   type Order,
   type OrderLine,
   type Product,
@@ -13,16 +14,26 @@ import {
 } from '../store';
 import { getCartOrThrow } from './carts';
 import { getProductOrThrow } from './catalog';
+import { getRedeemableCoupon, normalizeCouponCode } from './coupons';
 
 export interface CheckoutRequest {
   cartId: string;
+  couponCode?: string;
   /** If given, checkout fails instead of charging any other amount. */
   expectedTotalCents?: Cents;
 }
 
 /** Two checkout requests are "the same request" if these fields match. */
-export function checkoutFingerprint({ cartId, expectedTotalCents }: CheckoutRequest): string {
-  return JSON.stringify([cartId, expectedTotalCents ?? null]);
+export function checkoutFingerprint({
+  cartId,
+  couponCode,
+  expectedTotalCents,
+}: CheckoutRequest): string {
+  return JSON.stringify([
+    cartId,
+    couponCode === undefined ? null : normalizeCouponCode(couponCode),
+    expectedTotalCents ?? null,
+  ]);
 }
 
 export interface CheckoutDeps {
@@ -34,6 +45,7 @@ export interface CheckoutDeps {
 interface Reservation {
   cart: Cart;
   items: { product: Product; quantity: number }[];
+  coupon: Coupon | null;
   lines: OrderLine[];
   pricing: PriceBreakdown;
 }
@@ -41,12 +53,13 @@ interface Reservation {
 /**
  * Places an order for a cart in three phases:
  *
- * 1. Reserve: check the cart, stock and total, then hold the stock. This is
- *    synchronous, and Node runs one synchronous block at a time, so no other
- *    request can see or change state halfway through it.
+ * 1. Reserve: check the cart, stock, coupon and total, then hold the stock
+ *    and the coupon. This is synchronous, and Node runs one synchronous block
+ *    at a time, so no other request can see or change state halfway through.
  * 2. Pay: the only `await`. Other requests run meanwhile, but they see the
- *    held stock and the cart's CHECKING_OUT status, so they cannot take the
- *    same units or check out the same cart.
+ *    held stock, the RESERVED coupon and the cart's CHECKING_OUT status, so
+ *    they cannot take the same units, use the same coupon, or check out the
+ *    same cart.
  * 3. Commit the order, or release everything if payment failed. Synchronous
  *    again, so it is all-or-nothing.
  */
@@ -80,7 +93,10 @@ export async function checkout(deps: CheckoutDeps, request: CheckoutRequest): Pr
   return commit(deps.store, reservation, paymentId);
 }
 
-function reserve(store: Store, { cartId, expectedTotalCents }: CheckoutRequest): Reservation {
+function reserve(
+  store: Store,
+  { cartId, couponCode, expectedTotalCents }: CheckoutRequest,
+): Reservation {
   const cart = getCartOrThrow(store, cartId);
   if (cart.status === 'CHECKED_OUT') {
     throw conflict('CART_ALREADY_CHECKED_OUT', 'This cart has already been checked out.', {
@@ -117,12 +133,15 @@ function reserve(store: Store, { cartId, expectedTotalCents }: CheckoutRequest):
     );
   }
 
+  const coupon = couponCode === undefined ? null : getRedeemableCoupon(store, couponCode);
+
   const pricing = priceLines(
     items.map(({ product, quantity }) => ({
       productId: product.id,
       unitPriceCents: product.priceCents,
       quantity,
     })),
+    coupon?.percent ?? null,
   );
   if (expectedTotalCents !== undefined && expectedTotalCents !== pricing.totalCents) {
     throw conflict('TOTAL_MISMATCH', 'The order total is not the total you expected.', {
@@ -131,15 +150,21 @@ function reserve(store: Store, { cartId, expectedTotalCents }: CheckoutRequest):
     });
   }
 
-  // Every check passed: hold the stock. Nothing above has changed any state.
+  // Every check passed: hold the stock and the coupon. Nothing above has
+  // changed any state, so a failed check leaves everything as it was.
   for (const { product, quantity } of items) {
     product.reserved += quantity;
+  }
+  if (coupon) {
+    coupon.status = 'RESERVED';
+    coupon.reservedByCartId = cart.id;
   }
   cart.status = 'CHECKING_OUT';
 
   return {
     cart,
     items,
+    coupon,
     // Captured now so an edit made while payment is pending cannot leak in.
     lines: pricing.lines.map((line, index) => ({
       productId: line.productId,
@@ -153,7 +178,7 @@ function reserve(store: Store, { cartId, expectedTotalCents }: CheckoutRequest):
 }
 
 function commit(store: Store, reservation: Reservation, paymentId: string | null): Order {
-  const { cart, items, lines, pricing } = reservation;
+  const { cart, items, coupon, lines, pricing } = reservation;
 
   for (const { product, quantity } of items) {
     product.reserved -= quantity;
@@ -169,21 +194,31 @@ function commit(store: Store, reservation: Reservation, paymentId: string | null
     discountPercent: pricing.discountPercent,
     discountCents: pricing.discountCents,
     totalCents: pricing.totalCents,
-    couponCode: null,
+    couponCode: coupon?.code ?? null,
     paymentId,
     placedAt: new Date().toISOString(),
   };
   store.orders.set(order.id, order);
 
+  if (coupon) {
+    coupon.status = 'REDEEMED';
+    coupon.reservedByCartId = null;
+    coupon.redeemedByOrderId = order.id;
+    coupon.redeemedAt = order.placedAt;
+  }
   cart.status = 'CHECKED_OUT';
   cart.orderId = order.id;
   cart.updatedAt = order.placedAt;
   return order;
 }
 
-function release({ cart, items }: Reservation): void {
+function release({ cart, items, coupon }: Reservation): void {
   for (const { product, quantity } of items) {
     product.reserved -= quantity;
+  }
+  if (coupon) {
+    coupon.status = 'AVAILABLE';
+    coupon.reservedByCartId = null;
   }
   cart.status = 'OPEN';
 }

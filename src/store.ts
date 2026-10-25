@@ -48,6 +48,22 @@ export interface Order {
   placedAt: string;
 }
 
+export type CouponStatus = 'AVAILABLE' | 'RESERVED' | 'REDEEMED';
+
+export interface Coupon {
+  code: string;
+  /** Fixed when the coupon is generated. */
+  percent: number;
+  /** The order count that unlocked it: n, 2n, 3n, ... Unique per coupon. */
+  milestone: number;
+  status: CouponStatus;
+  /** The cart whose checkout holds the coupon while its payment is pending. */
+  reservedByCartId: string | null;
+  redeemedByOrderId: string | null;
+  createdAt: string;
+  redeemedAt: string | null;
+}
+
 /**
  * All application state. Everything lives in memory, so a restart starts
  * from the seed data again.
@@ -57,6 +73,8 @@ export interface Store {
   carts: Map<string, Cart>;
   /** Only successfully placed orders. Never deleted, so size = orders placed. */
   orders: Map<string, Order>;
+  /** By code. Never deleted, so size = coupons generated. */
+  coupons: Map<string, Coupon>;
   /** Checkout results by Idempotency-Key. */
   checkoutKeys: IdempotencyRecords<Order>;
 }
@@ -66,6 +84,7 @@ export function createStore(products: readonly Product[]): Store {
     products: new Map(products.map((product) => [product.id, { ...product }])),
     carts: new Map(),
     orders: new Map(),
+    coupons: new Map(),
     checkoutKeys: new Map(),
   };
 }
