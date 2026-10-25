@@ -20,6 +20,11 @@ export interface CheckoutRequest {
   expectedTotalCents?: Cents;
 }
 
+/** Two checkout requests are "the same request" if these fields match. */
+export function checkoutFingerprint({ cartId, expectedTotalCents }: CheckoutRequest): string {
+  return JSON.stringify([cartId, expectedTotalCents ?? null]);
+}
+
 export interface CheckoutDeps {
   store: Store;
   payment: PaymentGateway;

@@ -1,4 +1,5 @@
 import type { Cents } from './domain/money';
+import type { IdempotencyRecords } from './services/idempotency';
 
 export interface Product {
   id: string;
@@ -56,6 +57,8 @@ export interface Store {
   carts: Map<string, Cart>;
   /** Only successfully placed orders. Never deleted, so size = orders placed. */
   orders: Map<string, Order>;
+  /** Checkout results by Idempotency-Key. */
+  checkoutKeys: IdempotencyRecords<Order>;
 }
 
 export function createStore(products: readonly Product[]): Store {
@@ -63,6 +66,7 @@ export function createStore(products: readonly Product[]): Store {
     products: new Map(products.map((product) => [product.id, { ...product }])),
     carts: new Map(),
     orders: new Map(),
+    checkoutKeys: new Map(),
   };
 }
 

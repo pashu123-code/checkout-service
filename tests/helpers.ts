@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { type Server, createServer } from 'node:http';
 import request from 'supertest';
 import { afterEach } from 'vitest';
@@ -62,6 +63,10 @@ export function buildTestApp(options: TestAppOptions = {}) {
         await api.put(`/carts/${res.body.id}/items/${productId}`).send({ quantity }).expect(200);
       }
       return res.body.id;
+    },
+    /** A checkout request; uses a fresh Idempotency-Key unless one is given. */
+    checkout(cartId: string, body: object = {}, key: string = randomUUID()) {
+      return api.post(`/carts/${cartId}/checkout`).set('Idempotency-Key', key).send(body);
     },
   };
 }

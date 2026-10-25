@@ -1,6 +1,7 @@
-import express, { type Express } from 'express';
+import express, { type Express, type Request } from 'express';
 import { z } from 'zod';
 import type { Config } from './config';
+import { badRequest } from './errors';
 import { errorHandler, routeNotFound } from './http/errorHandler';
 import { parseBody } from './http/validate';
 import type { PaymentGateway } from './payment';
@@ -13,7 +14,8 @@ import {
   setItemQuantity,
   toCartView,
 } from './services/carts';
-import { checkout } from './services/checkout';
+import { checkout, checkoutFingerprint } from './services/checkout';
+import { runIdempotent } from './services/idempotency';
 import { getOrderOrThrow } from './services/orders';
 import type { Store } from './store';
 
@@ -61,9 +63,16 @@ export function createApp({ store, payment }: AppContext): Express {
   });
 
   app.post('/carts/:cartId/checkout', async (req, res) => {
-    const body = parseBody(checkoutBody, req.body);
-    const order = await checkout({ store, payment }, { cartId: req.params.cartId, ...body });
-    res.status(201).json(order);
+    const key = readIdempotencyKey(req);
+    const request = { cartId: req.params.cartId, ...parseBody(checkoutBody, req.body) };
+
+    const { value: order, replayed } = await runIdempotent(
+      store.checkoutKeys,
+      key,
+      checkoutFingerprint(request),
+      () => checkout({ store, payment }, request),
+    );
+    res.status(201).set('Idempotent-Replayed', String(replayed)).json(order);
   });
 
   app.get('/orders/:orderId', (req, res) => {
@@ -73,4 +82,19 @@ export function createApp({ store, payment }: AppContext): Express {
   app.use(routeNotFound);
   app.use(errorHandler);
   return app;
+}
+
+/**
+ * Checkout must be retry-safe, so the client has to say which attempt a
+ * request belongs to. Without a key, a retry would look like a new checkout.
+ */
+function readIdempotencyKey(req: Request): string {
+  const key = req.get('Idempotency-Key')?.trim();
+  if (!key || key.length > 255) {
+    throw badRequest(
+      'IDEMPOTENCY_KEY_REQUIRED',
+      'Send an Idempotency-Key header (1-255 characters) with every checkout.',
+    );
+  }
+  return key;
 }

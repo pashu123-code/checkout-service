@@ -4,10 +4,10 @@ import { ControlledPaymentGateway, buildTestApp, product } from './helpers';
 
 describe('checkout', () => {
   it('places an order that records exactly what was bought', async () => {
-    const { api, store, payment, cartWith } = buildTestApp();
+    const { api, store, payment, cartWith, checkout } = buildTestApp();
     const cartId = await cartWith({ p_tshirt: 2, p_mug: 1 });
 
-    const res = await api.post(`/carts/${cartId}/checkout`).send({}).expect(201);
+    const res = await checkout(cartId).expect(201);
 
     expect(res.body).toMatchObject({
       number: 1,
@@ -36,9 +36,9 @@ describe('checkout', () => {
   });
 
   it('keeps the order unchanged when the product changes afterwards', async () => {
-    const { api, store, cartWith } = buildTestApp();
+    const { api, store, cartWith, checkout } = buildTestApp();
     const cartId = await cartWith({ p_cap: 1 });
-    const placed = await api.post(`/carts/${cartId}/checkout`).send({}).expect(201);
+    const placed = await checkout(cartId).expect(201);
 
     const cap = store.products.get('p_cap')!;
     cap.priceCents = 9999;
@@ -50,22 +50,20 @@ describe('checkout', () => {
   });
 
   it('charges the current price if it changed after the item was added', async () => {
-    const { api, store, cartWith } = buildTestApp();
+    const { store, cartWith, checkout } = buildTestApp();
     const cartId = await cartWith({ p_mug: 2 });
     store.products.get('p_mug')!.priceCents = 1500;
 
-    const res = await api.post(`/carts/${cartId}/checkout`).send({}).expect(201);
+    const res = await checkout(cartId).expect(201);
     expect(res.body.totalCents).toBe(3000);
   });
 
   it('refuses to charge a total the client did not expect', async () => {
-    const { api, store, cartWith } = buildTestApp();
+    const { api, store, cartWith, checkout } = buildTestApp();
     const cartId = await cartWith({ p_mug: 2 });
     store.products.get('p_mug')!.priceCents = 1500;
 
-    const res = await api
-      .post(`/carts/${cartId}/checkout`)
-      .send({ expectedTotalCents: 2500 })
+    const res = await checkout(cartId, { expectedTotalCents: 2500 })
       .expect(409);
 
     expect(res.body.error).toMatchObject({
@@ -75,22 +73,22 @@ describe('checkout', () => {
     expect(store.products.get('p_mug')).toMatchObject({ stock: 50, reserved: 0 });
     expect((await api.get(`/carts/${cartId}`)).body.status).toBe('OPEN');
 
-    await api.post(`/carts/${cartId}/checkout`).send({ expectedTotalCents: 3000 }).expect(201);
+    await checkout(cartId, { expectedTotalCents: 3000 }).expect(201);
   });
 
   it('rejects an empty cart', async () => {
-    const { api, createCart } = buildTestApp();
+    const { createCart, checkout } = buildTestApp();
     const cartId = await createCart();
 
-    const res = await api.post(`/carts/${cartId}/checkout`).send({}).expect(422);
+    const res = await checkout(cartId).expect(422);
     expect(res.body.error.code).toBe('CART_EMPTY');
   });
 
   it('rejects an unknown cart and an unknown order', async () => {
-    const { api } = buildTestApp();
+    const { api, checkout } = buildTestApp();
 
-    const checkout = await api.post('/carts/cart_missing/checkout').send({}).expect(404);
-    expect(checkout.body.error.code).toBe('CART_NOT_FOUND');
+    const checkoutRes = await checkout('cart_missing').expect(404);
+    expect(checkoutRes.body.error.code).toBe('CART_NOT_FOUND');
     const order = await api.get('/orders/ord_missing').expect(404);
     expect(order.body.error.code).toBe('ORDER_NOT_FOUND');
   });
@@ -100,19 +98,19 @@ describe('checkout', () => {
     ['a fractional expected total', { expectedTotalCents: 10.5 }],
     ['a misspelled field', { expectedTotal: 100 }],
   ])('rejects %s', async (_label, body) => {
-    const { api, cartWith } = buildTestApp();
+    const { cartWith, checkout } = buildTestApp();
     const cartId = await cartWith({ p_mug: 1 });
 
-    const res = await api.post(`/carts/${cartId}/checkout`).send(body).expect(422);
+    const res = await checkout(cartId, body).expect(422);
     expect(res.body.error.code).toBe('VALIDATION_FAILED');
   });
 
   it('does not check out the same cart twice', async () => {
-    const { api, store, cartWith } = buildTestApp();
+    const { store, cartWith, checkout } = buildTestApp();
     const cartId = await cartWith({ p_hoodie: 1 });
-    const first = await api.post(`/carts/${cartId}/checkout`).send({}).expect(201);
+    const first = await checkout(cartId).expect(201);
 
-    const second = await api.post(`/carts/${cartId}/checkout`).send({}).expect(409);
+    const second = await checkout(cartId).expect(409);
     expect(second.body.error).toMatchObject({
       code: 'CART_ALREADY_CHECKED_OUT',
       details: { orderId: first.body.id },
@@ -122,12 +120,12 @@ describe('checkout', () => {
   });
 
   it('rejects checkout when stock ran out after the item was added', async () => {
-    const { api, store, cartWith } = buildTestApp();
+    const { api, store, cartWith, checkout } = buildTestApp();
     const first = await cartWith({ p_sneakers: 2 });
     const second = await cartWith({ p_sneakers: 2, p_mug: 1 });
 
-    await api.post(`/carts/${first}/checkout`).send({}).expect(201);
-    const res = await api.post(`/carts/${second}/checkout`).send({}).expect(409);
+    await checkout(first).expect(201);
+    const res = await checkout(second).expect(409);
 
     expect(res.body.error).toMatchObject({
       code: 'INSUFFICIENT_INVENTORY',
@@ -136,38 +134,38 @@ describe('checkout', () => {
     // Nothing from the failed checkout is held, and the cart can be fixed.
     expect(store.products.get('p_mug')).toMatchObject({ stock: 50, reserved: 0 });
     await api.delete(`/carts/${second}/items/p_sneakers`).expect(200);
-    await api.post(`/carts/${second}/checkout`).send({}).expect(201);
+    await checkout(second).expect(201);
   });
 
   it('releases stock and reopens the cart when payment is declined', async () => {
     const payment = new FakePaymentGateway(5);
-    const { api, store, cartWith } = buildTestApp({ payment });
+    const { api, store, cartWith, checkout } = buildTestApp({ payment });
     const cartId = await cartWith({ p_sneakers: 2 });
 
     payment.declineNext();
-    const res = await api.post(`/carts/${cartId}/checkout`).send({}).expect(402);
+    const res = await checkout(cartId).expect(402);
 
     expect(res.body.error.code).toBe('PAYMENT_DECLINED');
     expect(store.products.get('p_sneakers')).toMatchObject({ stock: 2, reserved: 0 });
     expect(store.orders.size).toBe(0);
     expect((await api.get(`/carts/${cartId}`)).body.status).toBe('OPEN');
 
-    const retry = await api.post(`/carts/${cartId}/checkout`).send({}).expect(201);
+    const retry = await checkout(cartId).expect(201);
     expect(retry.body.number).toBe(1);
     expect(store.products.get('p_sneakers')).toMatchObject({ stock: 0, reserved: 0 });
   });
 
   it('locks the cart while payment is pending', async () => {
     const payment = new ControlledPaymentGateway();
-    const { api, cartWith } = buildTestApp({ payment });
+    const { api, cartWith, checkout } = buildTestApp({ payment });
     const cartId = await cartWith({ p_mug: 1 });
 
-    const first = api.post(`/carts/${cartId}/checkout`).send({}).then((res) => res);
+    const first = checkout(cartId).then((res) => res);
     await payment.waitForCharges(1);
 
     const edit = await api.put(`/carts/${cartId}/items/p_mug`).send({ quantity: 5 }).expect(409);
     expect(edit.body.error.code).toBe('CART_NOT_OPEN');
-    const again = await api.post(`/carts/${cartId}/checkout`).send({}).expect(409);
+    const again = await checkout(cartId).expect(409);
     expect(again.body.error.code).toBe('CHECKOUT_IN_PROGRESS');
 
     payment.approve();
@@ -178,10 +176,10 @@ describe('checkout', () => {
 
   it('skips the payment provider when the total is zero', async () => {
     const payment = new ControlledPaymentGateway();
-    const { api, cartWith } = buildTestApp({ payment, products: [product('p_free', 0, 10)] });
+    const { cartWith, checkout } = buildTestApp({ payment, products: [product('p_free', 0, 10)] });
     const cartId = await cartWith({ p_free: 3 });
 
-    const res = await api.post(`/carts/${cartId}/checkout`).send({}).expect(201);
+    const res = await checkout(cartId).expect(201);
     expect(res.body).toMatchObject({ totalCents: 0, paymentId: null });
     expect(payment.pendingCount).toBe(0);
   });
@@ -190,14 +188,14 @@ describe('checkout', () => {
 describe('concurrent checkouts', () => {
   it('never sells more units than are in stock', async () => {
     const payment = new ControlledPaymentGateway();
-    const { api, store, cartWith } = buildTestApp({
+    const { store, cartWith, checkout } = buildTestApp({
       payment,
       products: [product('p_scarce', 1000, 3)],
     });
     const carts = await Promise.all(Array.from({ length: 10 }, () => cartWith({ p_scarce: 1 })));
 
     const responses = Promise.all(
-      carts.map((cartId) => api.post(`/carts/${cartId}/checkout`).send({}).then((res) => res)),
+      carts.map((cartId) => checkout(cartId).then((res) => res)),
     );
 
     // While three payments are still pending, those units are held and no
@@ -214,7 +212,7 @@ describe('concurrent checkouts', () => {
 
   it('keeps stock consistent with orders under a random mix of quantities and declines', async () => {
     const payment = new FakePaymentGateway(10);
-    const { api, store, cartWith } = buildTestApp({
+    const { store, cartWith, checkout } = buildTestApp({
       payment,
       products: [product('p_a', 500, 7), product('p_b', 300, 5)],
     });
@@ -232,7 +230,7 @@ describe('concurrent checkouts', () => {
     payment.declineNext(2);
 
     const responses = await Promise.all(
-      carts.map((cartId) => api.post(`/carts/${cartId}/checkout`).send({})),
+      carts.map((cartId) => checkout(cartId)),
     );
 
     expect(responses.every((res) => [201, 402, 409].includes(res.status))).toBe(true);
